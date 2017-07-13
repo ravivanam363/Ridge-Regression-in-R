@@ -1,0 +1,203 @@
+---
+title: "Ridge Regression in R"
+output: html_document
+---
+```{r}
+library(caret)
+library(penalized)
+library(RANN)
+library(caret)
+```
+
+Centering and scaling numerical predictors.
+```{r}
+RegData <- read.csv('exam1.csv')
+RegData2 <- RegData
+RegData2[,1:14] <- scale(RegData[,1:14], center = TRUE, scale = TRUE)
+
+```
+
+ Creating dummy variables for categorical predictors.
+```{r}
+dummy_variables <- dummyVars(" ~ .", data = RegData2)
+RegData3 <- data.frame(predict(dummy_variables, newdata = RegData2))
+
+```
+
+Split the data into a training and test set
+```{r}
+set.seed(143)
+train_samples <- createDataPartition(RegData3$y, p = .8)
+
+train_data <- RegData3[train_samples$Resample1, ]
+head(train_data)
+
+test_data <- RegData3[-train_samples$Resample1, ]
+head(test_data)
+```
+
+Split the training data using 4 fold cross validation.
+```{r}
+set.seed(155)
+cv_samples <- createFolds(train_data$y, k = 4, list = FALSE)
+
+train_1 <- train_data[cv_samples %in% c(1,2,3), ]
+head(train_1)
+test_1 <- train_data[cv_samples == 4, ]
+head(test_1)
+
+train_2 <- train_data[cv_samples %in% c(2,3,4), ]
+head(train_2)
+test_2 <- train_data[cv_samples == 1, ]
+head(test_2)
+
+train_3 <- train_data[cv_samples %in% c(1,3,4), ]
+head(train_3)
+test_3 <- train_data[cv_samples == 2, ]
+head(test_3)
+
+train_4 <- train_data[cv_samples %in% c(1,2,4), ]
+head(train_4)
+test_4 <- train_data[cv_samples == 3, ]
+head(test_4)
+```
+Fit ridge regression models for a range of Lambda2 values.
+
+I initially used Lambda values from 0 to 200 and found out that RMSE is minimum in the interval 0 to 0.5.
+again reduced the lambda range from 0 to 1 and found that RMSE is minimum near zero.
+
+
+```{r}
+
+set.seed(163)
+ridgeGrid <- expand.grid(lambda = seq(0,.2 , length = 1000))
+
+
+ridgeModel1 <- train(x = train_1[,1:16], y = train_1$y,
+                   method = "ridge",
+                   tuneGrid = ridgeGrid)
+#head(ridgeModel1)
+
+#print(update(plot(ridgeModel1), xlab = "Lambda Values"))
+```
+
+```{r}
+set.seed(122)
+
+ridgeGrid <- expand.grid(lambda = seq(0,.2 , length = 1000))
+
+set.seed(100)
+ridgeModel2 <- train(x = train_2[,1:16], y = train_2$y,
+                   method = "ridge",
+                   tuneGrid = ridgeGrid)
+#head(ridgeModel2)
+
+print(update(plot(ridgeModel2), xlab = "Lambda Values"))
+```
+
+
+```{r}
+set.seed(363)
+ridgeGrid <- expand.grid(lambda = seq(0,0.2 , length = 1000))
+
+set.seed(100)
+ridgeModel3 <- train(x = train_3[,1:16], y = train_3$y,
+                   method = "ridge",
+                   tuneGrid = ridgeGrid)
+#head(ridgeModel3)
+
+print(update(plot(ridgeModel3), xlab = "Lambda Values"))
+```
+
+```{r}
+set.seed(420)
+ridgeGrid <- expand.grid(lambda = seq(0,.2 , length = 1000))
+
+ridgeModel4 <- train(x = train_4[,1:16], y = train_4$y,
+                   method = "ridge",
+                   tuneGrid = ridgeGrid)
+#head(ridgeModel4)
+
+print(update(plot(ridgeModel4), xlab = "Lambda Values"))
+```
+
+For each value of lambda2, you will have 4 models (1 for each fold). Evaluate the RMSE of all models on the
+fold not used to train. Use a loop for this.
+
+From the above four models I got four best lambdas. Using these lambdas again I am fitting the models. For each lambda I am fitting four models and calculating their RMSEs
+
+```{r}
+lambdaList <- c(1.001001e-05,1.001001e-05,0,0.001361361)
+
+  
+testList <- vector(mode = "list", length = 4)
+testList[[1]] <- test_1[,-17]
+testList[[2]] <- test_2[,-17]
+testList[[3]] <- test_3[,-17]
+testList[[4]] <- test_4[,-17]
+
+trainList <- vector(mode = "list", length = 4)
+trainList[[1]] <- train_1
+trainList[[2]] <- train_2
+trainList[[3]] <- train_3
+trainList[[4]] <- train_4
+
+testList_y <- vector(mode = "list", length = 16)
+testList_y[[1]] <- test_1$y
+testList_y[[2]] <- test_2$y
+testList_y[[3]] <- test_3$y
+testList_y[[4]] <- test_4$y
+
+rmseDf <- data.frame()
+RMSE <- function(x,y){
+  sqrt(mean((x - y)^2))
+}
+
+for(k in 1:4){
+  for(i in 1:4){
+    ridge_model <- penalized(y ~., data = trainList[[i]] , lambda2 = lambdaList[k], standardize = FALSE)
+    test_preds_ridge <- predict(ridge_model, testList[[i]])
+    
+    rmseDf[k,1] <- lambdaList[k]
+    rmseDf[k,i+1] <- (RMSE(testList_y[[i]],test_preds_ridge[,"mu"])) 
+    
+  }
+}
+
+rmseDf[1,6] <- mean(unlist(rmseDf[1,2:5])) 
+rmseDf[2,6] <- mean(unlist(rmseDf[2,2:5])) 
+rmseDf[3,6] <- mean(unlist(rmseDf[3,2:5])) 
+rmseDf[4,6] <- mean(unlist(rmseDf[4,2:5])) 
+
+colnames(rmseDf) <- c("L2","t1","t2","t3","t4","Avg")
+ggplot(rmseDf, aes(x = rmseDf[,1], y = rmseDf[,6])) +
+geom_line()+
+geom_point()+
+  labs(title = "RMSE Vs Lambda Plot", x = "Lambdas", y = "RMSE")
+
+```
+
+Mean RMSE values are calculated in the above code and stored in the last column of rmseDf dataframe
+From the above plot and RMSE value I selected the best lambda for the model.
+
+Using the selected lambda Value, I am fitting the model to entire train data.
+```{r}
+ridge_model_final <- penalized(y ~., data = train_data , lambda2 = 1.361361e-03, standardize = FALSE)
+test_preds_ridge_final <- predict(ridge_model_final, test_data[,-17])
+test_preds_ridge_final
+Predicted_yhats <- as.data.frame(test_preds_ridge_final[,"mu"])
+```
+
+From the above model, prediced the test data and it's outcome is Predicted_yhats.
+From these values, calculating RMSE and Rsquare
+```{r}
+SSR <-sum(unlist(Predicted_yhats - mean(unlist(test_data$y)))^2)
+SST <- sum(unlist(test_data$y - mean(unlist(test_data$y)))^2)
+
+SSE <- sum(((unlist(test_data$y)) - Predicted_yhats)^2)
+Rsquare <- (1 -(SSE/SST) )
+RMSEFinal <- RMSE(test_data$y,Predicted_yhats)
+RMSEFinal
+Rsquare
+```
+
